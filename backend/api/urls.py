@@ -1,9 +1,7 @@
 from django.urls import path
-from .views import FetchData, EmbedData, ClusterData, WarmupPing
+from .views import ThoughtNetPipelineView, WarmupPing
 
 urlpatterns = [
-    path("fetch/", FetchData.as_view()),
-    path("embed/", EmbedData.as_view()),
-    path("cluster/", ClusterData.as_view()),
-    path("warmup/", WarmupPing.as_view()),
+    path("cluster/", ThoughtNetPipelineView.as_view(), name="cluster"),
+    path("warmup/", WarmupPing.as_view(), name="warmup-ping"),
 ]
