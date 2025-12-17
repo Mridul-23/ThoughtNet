@@ -13,8 +13,9 @@ def evaluate_clusters(embeddings, labels):
     if labels and isinstance(labels[0], (list, tuple)):
         labels = [lbl[0] for lbl in labels]
 
-    # Handle empty or single cluster cases
-    if not labels or len(set(labels)) <= 1:
+    # Handle empty, single cluster, or all-unique cluster cases (n_clusters >= n_samples)
+    unique_labels = set(labels)
+    if not labels or len(unique_labels) <= 1 or len(unique_labels) >= len(embeddings):
         return {
             "silhouette": None,
             "davies_bouldin": None,

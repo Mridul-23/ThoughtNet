@@ -1,20 +1,32 @@
-from keybert import KeyBERT
+from transformers import pipeline
 
-kw_model = KeyBERT("all-MiniLM-L6-v2")
+# Initialize the summarization pipeline
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
-def label_cluster(texts, top_n=2):
+def generate_summary(texts):
     """
-    Generate a short label for a cluster based on its texts.
+    Generate a summary for a cluster based on its texts.
     """
     if not texts:
         return "Misc"
 
-    keywords = kw_model.extract_keywords(
-        " ".join(texts), 
-        keyphrase_ngram_range=(1, 2),
-        stop_words="english",
-        top_n=top_n
-    )
-    # keywords = [("AI research", 0.72), ...]
-    label = ", ".join([kw for kw, _ in keywords])
-    return label.title() if label else "Misc"
+    # Combine texts into a single string
+    combined_text = " ".join(texts)
+    
+    # Truncate if too long (BART limit is usually 1024 tokens)
+    if len(combined_text) > 3000:
+        combined_text = combined_text[:3000]
+
+    try:
+        summary = summarizer(combined_text, max_length=50, min_length=10, do_sample=False)
+        return summary[0]['summary_text']
+    except Exception as e:
+        print(f"Summarization failed: {e}")
+        return "Cluster Summary"
+
+def label_cluster(texts, top_n=2):
+    """
+    Legacy function wrapper for backward compatibility if needed, 
+    or we can just use generate_summary.
+    """
+    return generate_summary(texts)
