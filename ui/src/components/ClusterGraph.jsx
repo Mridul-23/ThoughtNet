@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import axios from "axios";
 import ForceGraph2D from "react-force-graph-2d";
 import Modal from "./Modal";
@@ -21,6 +21,14 @@ function drawFallbackCloud(ctx, cx, cy, r, color = "#ffa500") {
   ctx.restore();
 }
 
+function elasticKick(node, strength = 0.6) {
+  const a = Math.random() * Math.PI * 2;
+  const r = 6 + Math.random() * 6;
+  node.vx = Math.cos(a) * r * strength;
+  node.vy = Math.sin(a) * r * strength;
+}
+
+
 const ClusterGraph = () => {
   const [query, setQuery] = useState("Is AGI upcoming or still too far?");
   const [loading, setLoading] = useState(false);
@@ -28,6 +36,8 @@ const ClusterGraph = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedNode, setSelectedNode] = useState(null);
   const fgRef = useRef();
+  const topologyChangedRef = useRef(false);
+
 
   // Full graph returned by backend (immutable canonical)
   const [fullData, setFullData] = useState({ nodes: [], links: [] });
@@ -42,6 +52,29 @@ const ClusterGraph = () => {
   // image for cluster clouds
   const cloudImgRef = useRef(null);
   const [cloudLoaded, setCloudLoaded] = useState(false);
+
+  const clusterCenters = useMemo(() => {
+    const map = new Map();
+
+    displayData.nodes.forEach(n => {
+      if (!n.parent) return;
+      if (!map.has(n.parent)) {
+        map.set(n.parent, { x: 0, y: 0, c: 0 });
+      }
+      const m = map.get(n.parent);
+      m.x += n.x;
+      m.y += n.y;
+      m.c++;
+    });
+
+    map.forEach(v => {
+      v.x /= v.c;
+      v.y /= v.c;
+    });
+
+    return map;
+  }, [displayData.nodes]);
+
 
   // load cloud image once
   useEffect(() => {
@@ -127,14 +160,15 @@ const ClusterGraph = () => {
            const pId = typeof parentLink.source === 'object' ? parentLink.source.id : parentLink.source;
            const parentPos = posMap.get(pId);
            if (parentPos) {
-               return {
-                   ...n,
-                   x: parentPos.x,
-                   y: parentPos.y,
-                   // Tiny jitter to avoid stacking
-                   vx: (Math.random() - 0.5) * 0.1,
-                   vy: (Math.random() - 0.5) * 0.1
-               };
+               const newNode = {
+                ...n,
+                x: parentPos.x,
+                y: parentPos.y
+              };
+
+              elasticKick(newNode);
+              return newNode;
+
            }
        }
        return n;
@@ -159,7 +193,7 @@ const ClusterGraph = () => {
     }).filter(Boolean);
 
     return { nodes: merged, links: visibleLinks };
-  }, [displayData]);
+  }, []);
 
   // Whenever fullData or expansion set changes, compute visible graph
   useEffect(() => {
@@ -245,11 +279,10 @@ const ClusterGraph = () => {
       }
 
       // resume simulation with a gentle reheat for smooth expansion
-      if (typeof fg.d3AlphaTarget === "function") {
-          // If we have just added nodes, we might need a stronger kick but brief
-          fg.d3AlphaTarget(0.1).restart(); 
-          // Let it decay naturally - do NOT force to 0 immediately, 
-          // this allows user to drag nodes while it's settling.
+      if (topologyChangedRef.current && typeof fg.d3Alpha === "function") {
+        fg.d3Alpha(0.25);
+        fg.restart();
+        topologyChangedRef.current = false;
       } else {
           // fallback
           if (typeof fg.start === "function") fg.start(); 
@@ -310,6 +343,7 @@ const ClusterGraph = () => {
       // Initially, expand all 'sub_topic' nodes so specific 'clusters' are visible?
       // Or just start clean. Let's expand everything by default or nothing.
       // Let's expand sub_topics by default so users see questions breakdown.
+
       const initialExpanded = new Set();
       nodes.forEach(n => {
         if (n.type === 'root' || n.type === 'sub_topic') {
@@ -354,19 +388,6 @@ const ClusterGraph = () => {
        } catch (e) {}
     }
   };
-
-  // after every render of displayData, snapshot node positions so we can merge next time
-  useEffect(() => {
-    const nodes = displayData.nodes || [];
-    const map = new Map();
-    nodes.forEach((n) => {
-      if (typeof n.x === "number" && typeof n.y === "number") {
-        map.set(n.id, { x: n.x, y: n.y, vx: n.vx, vy: n.vy });
-      }
-    });
-    // store positions (this will be read before next visibility change)
-    lastNodeMapRef.current = map;
-  }, [displayData]);
 
   // Snapshot / Download
   const handleDownloadJSON = () => {
@@ -482,6 +503,13 @@ const ClusterGraph = () => {
         backgroundColor="#0f172a"
         onNodeClick={handleNodeClick}
         nodeCanvasObject={(node, ctx, globalScale) => {
+          clusterCenters.forEach(c => {
+            ctx.beginPath();
+            ctx.arc(c.x, c.y, 90, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(168,85,247,0.05)";
+            ctx.fill();
+          });
+
           const label = node.label || "";
           const fontSize = Math.max(9, 12 / (globalScale || 1));
           ctx.font = `${fontSize}px Sans-Serif`;
@@ -533,6 +561,12 @@ const ClusterGraph = () => {
             ctx.arc(node.x, node.y, 4, 0, 2 * Math.PI, false);
             ctx.fill();
           }
+        }}
+
+        onRenderFramePre={() => {
+          displayData.nodes.forEach(n => {
+            delete n.__haloDrawn;
+          });
         }}
       />
 
